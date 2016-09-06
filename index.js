@@ -1,195 +1,69 @@
 'use strict';
 
-var util = require('./util.js'),
-    got  = require('got'),
-    et   = require('elementtree');
+const Promise = require('pinkie-promise');
+const Url = require('url');
+const parse = require('./lib/parse.js');
+const got = require('got');
+const noop = Function.prototype;
 
-var isEmpty    = util.isEmpty,
-    assignProp = util.assignProp,
-    typedVal   = util.typedVal,
-    createUrl  = util.createUrl;
+const DEFAULT_SCANTIMEOUT = 10;
+const WEB_URL = 'http://www.wolframalpha.com/input/';
+const API_URL = 'http://api.wolframalpha.com/v2/query';
 
-var APP_ID  = '3H4296-5YPAGQUJK7',
-    WEB_URL = 'http://www.wolframalpha.com/input/',
-    API_URL = 'http://api.wolframalpha.com/v2/query';
+module.exports = function(input, options, callback) {
+  options = options || {};
+  callback = callback || noop;
 
-var DEF_SCANTIMEOUT = 10;
+  let query = Object.assign({
+    input,
+    format: 'plaintext,minput',
+    appid: options.appId || process.env.WOLFRAM_API_TOKEN,
+    scantimeout: DEFAULT_SCANTIMEOUT
+  }, options.query);
 
+  if (!query.appid) {
+    return Promise.reject(new Error('Wolfram API token is missing!'));
+  }
 
-function processPlaintext(plaintext){
-    if (!plaintext)
-        return plaintext;
+  let queryUrl = createUrl(API_URL, query);
+  let url = createUrl(WEB_URL, { i: query.input });
 
-    var lines = plaintext.split('\n');
-    
-    var COL_DELIM = ' | ';
+  options = Object.assign(options, { url, queryUrl });
 
-    return lines.map(function(line){
-        var cols = line.split(COL_DELIM);
-        return cols.map(function(col){
-            return col.trim();
-        });
+  return got(queryUrl)
+    .then(resp => processResponse(resp.body, options))
+    .then(data => {
+      callback(null, data);
+      return data;
+    })
+    .catch(err => {
+      callback(err);
+      return Promise.reject(err);
     });
+};
+
+function createUrl(baseUrl, query) {
+  let url = Url.parse(baseUrl);
+  url.query = query;
+  return Url.format(url);
 }
 
+function processResponse(xml, options) {
+  let result = parse(xml);
 
-function getLinks(pod){
-    var links = [];
+  // Reject with parsed error.
+  if (result.err) return Promise.reject(result.err);
 
-    pod.findall('infos/info/link').forEach(function(linkNode){
-        var link = {};
-        assignProp(link, 'text', linkNode.get('text'));
-        assignProp(link, 'url',  linkNode.get('url'));
+  // Return parsed xml tree.
+  if (options.outputType === 'xml') {
+    return result.source;
+  }
 
-        if (isEmpty(link))
-            return;
-
-        links.push(link);
-    });    
-
-    return links;
+  // Return extracted data.
+  let data = Object.assign({
+    url: options.url,
+    queryUrl: options.queryUrl,
+    query: options.query
+  }, result.data());
+  return data;
 }
-
-function getSubpods(pod){
-    var subpods = [];
-
-    pod.findall('subpod').forEach(function(subpodNode){
-        var subpod = {};
-
-        var title     = subpodNode.get('title'),
-            plaintext = processPlaintext(subpodNode.findtext('plaintext')),
-            minput    = subpodNode.findtext('minput');
-
-        assignProp(subpod, 'title', title);
-        assignProp(subpod, 'plaintext', plaintext);
-        assignProp(subpod, 'minput', minput);
-
-        if (isEmpty(subpod))
-            return;
-
-        subpods.push(subpod);
-    });
-
-    return subpods;
-}
-
-function getPods(xmldoc){
-    var pods = [];
-
-    xmldoc.findall('pod').forEach(function(podNode){            
-        var pod = {};
-        assignProp(pod, 'title', podNode.get('title'));
-        assignProp(pod, 'error', typedVal(podNode.get('error'), 'bool'));
-        assignProp(pod, 'type', podNode.get('id'));
-        assignProp(pod, 'scanner', podNode.get('scanner'));
-        assignProp(pod, 'subpods', getSubpods(podNode));
-        assignProp(pod, 'links', getLinks(podNode));
-
-        if (isEmpty(pod))
-            return; 
-
-        pods.push(pod);
-    });
-
-    return pods;
-}
-
-function getResultInfo(xmldoc){
-    var resultInfo = {};
-
-    var resultNode = xmldoc.getroot();
-    assignProp(resultInfo, 'id', resultNode.get('id'));
-    assignProp(resultInfo, 'success', typedVal(resultNode.get('success'), 'bool'));
-    assignProp(resultInfo, 'podcount', typedVal(resultNode.get('numpods'), 'number'));
-    assignProp(resultInfo, 'timing', typedVal(resultNode.get('timing'), 'number'));
-    assignProp(resultInfo, 'parsetiming', typedVal(resultNode.get('parsetiming'), 'number'));
-    assignProp(resultInfo, 'datatypes', typedVal(resultNode.get('datatypes'), 'array'));
-    assignProp(resultInfo, 'timedoutpods', typedVal(resultNode.get('timedoutpods'), 'array'));
-    assignProp(resultInfo, 'version', typedVal(resultNode.get('version'), 'number'));
-
-    return resultInfo;
-}
-
-function getResultError(xmldoc){
-    var resultNode = xmldoc.getroot(),
-        isError    = typedVal(resultNode.get('error'), 'bool');
-
-    if (!isError)
-        return null;
-
-    var errCode = typedVal(resultNode.findtext('error/code'), 'number'),
-        errMsg  = resultNode.findtext('error/msg');
-
-    var err = new Error(errMsg);
-    err.code = errCode;
-    return err;
-}
-
-function execQuery(input, options, callback){
-    if (arguments.length === 2)
-        callback = options;
-
-    callback = callback || Function.prototype;
-    options = options || {};
-
-    var query = {
-        input: input,
-        format: 'plaintext,minput',
-        appid: APP_ID,
-        scantimeout: DEF_SCANTIMEOUT
-    };
-
-    var queryParams = options.query || {};
-    if (options.appId)
-        queryParams.appid = options.appId;
-
-    Object.keys(queryParams).forEach(function(paramName){
-        query[paramName] = queryParams[paramName];
-    });
-
-    var queryUrl = createUrl(API_URL, query),
-        url      = createUrl(WEB_URL, { i: query.input });
-
-    got(queryUrl, function complete(err, xml){
-        if (err) {
-            callback(err);
-            return;
-        }
-
-        var resDoc = et.parse(xml);
-
-        var err = getResultError(resDoc);
-        if (err) {
-            callback(err, xml);
-            return;
-        }
-
-        var outputType = options.outputType;
-
-        if (outputType === 'xml') {
-            callback(null, resDoc.tostring());
-            return;
-        }
-
-        var info = getResultInfo(resDoc),
-            pods = getPods(resDoc);
-
-        var result = {
-            url: url,
-            queryUrl: queryUrl,
-            query: query,
-            info: info,
-            pods: pods
-        };
-
-        if (outputType === 'json') {
-            var json = JSON.stringify(result, null, 2);
-            callback(null, json);
-            return;
-        }
-
-        callback(null, result);
-    });
-}
-
-module.exports = execQuery;

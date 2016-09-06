@@ -1,8 +1,11 @@
 {
   "name": "wolfram-query",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "",
   "main": "index.js",
+  "engines": {
+    "node": ">=4"
+  },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -10,6 +13,7 @@
   "license": "MIT",
   "dependencies": {
     "elementtree": "^0.1.6",
-    "got": "^3.3.0"
+    "got": "^6.3.0",
+    "pinkie-promise": "^2.0.1"
   }
 }
