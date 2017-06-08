@@ -9,10 +9,7 @@ const DEFAULT_SCANTIMEOUT = 10;
 const WEB_URL = 'http://www.wolframalpha.com/input/';
 const API_URL = 'http://api.wolframalpha.com/v2/query';
 
-module.exports = function(input, options, callback) {
-  options = options || {};
-  callback = callback || noop;
-
+module.exports = function(input, options={}, callback=noop) {
   let query = Object.assign({
     input,
     format: 'plaintext,minput',
