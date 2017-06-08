@@ -3,9 +3,6 @@
   "unused": true,
   "node": true,
   "esversion": 6,
-  "predef": [
-    "-Promise"
-  ],
   "eqeqeq": true,
   "newcap": false,
   "globals": {}

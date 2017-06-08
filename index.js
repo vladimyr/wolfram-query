@@ -1,6 +1,5 @@
 'use strict';
 
-const Promise = require('pinkie-promise');
 const Url = require('url');
 const parse = require('./lib/parse.js');
 const got = require('got');
